@@ -1,0 +1,81 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+
+  # Chemin par défaut pour VirtualBox
+  config.vm.provider "virtualbox" do |vb|
+    #vb.customize ["modifyvm", :id, "--basefolder", "D:/VMS"]
+  end
+
+  NODES = {
+    "kmaster"  => "192.168.56.200",
+    "kworker1" => "192.168.56.201",
+    "kworker2" => "192.168.56.202"
+  }
+
+  NODES.each do |name, ip|
+    config.vm.define name do |node|
+      node.vm.hostname = name
+
+      # RAM, CPU et pas de GUI
+      node.vm.provider "virtualbox" do |vb|
+        vb.memory = 3000
+        vb.cpus = 2
+        vb.gui = false
+      end
+
+      # Réseau NAT + Host-only
+      node.vm.network "forwarded_port", guest: 22, host: (2200 + ip.split(".").last.to_i), id: "ssh"
+      node.vm.network "private_network", ip: ip
+
+      # Provisioning
+      node.vm.provision "shell", inline: <<-SHELL
+        # Mettre à jour et installer les dépendances
+        apt-get update -y && apt-get upgrade -y
+        apt-get install -y sudo curl vim
+
+        # Désactiver swap pour Kubernetes
+        swapoff -a
+        sed -i '/ swap / s/^/#/' /etc/fstab
+
+        # Activer overlay et bridge
+        modprobe overlay
+        modprobe br_netfilter
+        cat <<EOF | tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+        sysctl --system
+
+        # Configurer root pour SSH
+        echo "root:loploplop" | chpasswd
+        sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+		sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+		sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+		sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        systemctl restart ssh
+
+        # Créer l'utilisateur kuber avec les mêmes permissions que root
+        useradd -m -s /bin/bash kuber
+        echo "kuber:loploplop" | chpasswd
+        usermod -aG sudo kuber
+        echo "kuber ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+        # Installer containerd
+        apt-get install -y containerd
+        mkdir -p /etc/containerd
+        containerd config default | tee /etc/containerd/config.toml
+        systemctl restart containerd
+        systemctl enable containerd
+
+        # Installer Kubernetes
+        apt-get install -y apt-transport-https ca-certificates curl
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/kubernetes.gpg
+        echo "deb https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+        apt-get update
+        apt-get install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
+      SHELL
+    end
+  end
+end
