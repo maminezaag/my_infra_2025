@@ -18,7 +18,11 @@ Vagrant.configure("2") do |config|
 
       # RAM, CPU et pas de GUI
       node.vm.provider "virtualbox" do |vb|
-        vb.memory = 3000
+        if name == "kmaster"
+          vb.memory = 4000
+        else
+          vb.memory = 2000
+        end
         vb.cpus = 2
         vb.gui = false
       end
@@ -54,6 +58,8 @@ EOF
 		sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 		sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
         systemctl restart ssh
+		
+		
 
         # Créer l'utilisateur kuber avec les mêmes permissions que root
         useradd -m -s /bin/bash kuber
@@ -75,17 +81,38 @@ EOF
         apt-get update
         apt-get install -y kubelet kubeadm kubectl
         apt-mark hold kubelet kubeadm kubectl
+		sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd #Synchronise l'horloge système via NTP.Nécessaire partout : Les nœuds doivent avoir une heure cohérente pour éviter les erreurs de certificats ou de coordination.
+		sudo swapoff -a && sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+		sudo systemctl enable kubelet
+		#if kubeadm fail :    sudo kubeadm reset -f sudo rm -rf /etc/kubernetes/*    sudo rm -rf /var/lib/etcd/*    sudo rm -rf $HOME/.kube 
+		sudo usermod -aG root kuber
       SHELL
+
+    if name == "kmaster"
+      node.vm.provision "shell", inline: <<-SHELL
+     sleep 10
+    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    echo "fin de modification dans fichier config.toml"
+
+sudo systemctl restart containerd;sudo systemctl enable containerd
+sleep 10
+sudo kubeadm init --apiserver-advertise-address=192.168.56.200 --pod-network-cidr=192.168.0.0/16
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config ;sudo chown $(id -u):$(id -g) $HOME/.kube/config
+sleep 10
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+sleep 10
+kubeadm token create --print-join-command
+      SHELL
+          
+        end
+
     end
   end
 end
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-sudo kubeadm init --apiserver-advertise-address=192.168.56.200 --pod-network-cidr=192.168.0.0/16
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-kubeadm token create --print-join-command
+
+
+
+
+#kubeadm token create --print-join-command
 
