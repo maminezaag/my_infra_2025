@@ -89,30 +89,34 @@ EOF
       SHELL
 
     if name == "kmaster"
-      node.vm.provision "shell", inline: <<-SHELL
-     sleep 10
-    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-    echo "fin de modification dans fichier config.toml"
-
-sudo systemctl restart containerd;sudo systemctl enable containerd
-sleep 10
-sudo kubeadm init --apiserver-advertise-address=192.168.56.200 --pod-network-cidr=192.168.0.0/16
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config ;sudo chown $(id -u):$(id -g) $HOME/.kube/config
-sleep 10
-kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-sleep 10
-kubeadm token create --print-join-command
+    node.vm.provision "shell", inline: <<-SHELL
+          sleep 10
+          sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+          echo "fin de modification dans fichier config.toml"
+          sudo systemctl restart containerd;sudo systemctl enable containerd
+          sleep 10
+          sudo kubeadm init --apiserver-advertise-address=192.168.56.200 --pod-network-cidr=192.168.0.0/16
+          mkdir -p /home/kuber/.kube
+          cp -i /etc/kubernetes/admin.conf /home/kuber/.kube/config ; chown kuber:kuber /home/kuber/.kube/config
+          # Wait for Kubernetes to be ready
+          until sudo -u kuber kubectl get nodes | grep -q Ready; do sleep 1; done
+          # Install Calico
+          sudo -u kuber kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml 
+          sleep 10 ;echo "check calicooo" 
+          kubeadm token create --print-join-command > /vagrant/join-command.sh
+          sed -i 's/^/sudo /' /vagrant/join-command.sh
       SHELL
-          
-        end
-
     end
-  end
+
+if name != "kmaster"
+        node.vm.provision "shell", inline: <<-SHELL
+        set -x
+        bash /vagrant/join-command.sh
+      SHELL
 end
 
 
 
-
-#kubeadm token create --print-join-command
-
+    end
+  end
+end
