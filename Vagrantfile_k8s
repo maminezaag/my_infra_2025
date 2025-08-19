@@ -1,3 +1,9 @@
+sudo sed -i "s|^KUBELET_EXTRA_ARGS=.*|KUBELET_EXTRA_ARGS=--node-ip=192.168.56.200|" /etc/default/kubelet
+sudo sed -i 's/"$/ --node-ip=192.168.56.200"/' /var/lib/kubelet/kubeadm-flags.env
+sudo systemctl daemon-reexec
+sudo systemctl restart kubelet
+
+
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/jammy64"
 
